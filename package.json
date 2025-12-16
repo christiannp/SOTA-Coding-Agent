@@ -1,0 +1,19 @@
+{
+  "name": "sota-coding-agent",
+  "displayName": "SOTA Coding Agent",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.80.0" },
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sota-coding-agent.start",
+        "title": "SOTA Coding Agent: Start Refactoring"
+      }
+    ]
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}
