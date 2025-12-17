@@ -1,5 +1,7 @@
 # State-of-the-art Coding Agent
 
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/29cd6596-9d1e-42f1-a913-7a80ab93edde" />
+
 Managing library updates is still manageable, however, upgrading algorithms is often time-consuming and error-prone. To address this, we build a coding agent capable of refactoring complex code using the latest state-of-the-art algorithms. It has to be cost-effective in terms of token usage and seamlessly integrated into VS Code, so developers can work without the friction of copy-paste code back and forth. We utilizes a "Map-Reduce" strategy for efficient context handling and a "Safe Diff" engine to ensure zero-hallucination patch generation.
 
 ---
