@@ -1,6 +1,6 @@
-# SOTA Code Refinement Agent
+# State-of-the-art Coding Agent
 
-A local, Dockerized code refactoring system designed for high-stakes environments. It utilizes a "Map-Reduce" strategy for efficient context handling and a "Safe Diff" engine to ensure zero-hallucination patch generation.
+Managing library updates is still manageable, however, upgrading algorithms is often time-consuming and error-prone. To address this, we build a coding agent capable of refactoring complex code using the latest state-of-the-art algorithms. It has to be cost-effective in terms of token usage and seamlessly integrated into VS Code, so developers can work without the friction of copy-paste code back and forth. We utilizes a "Map-Reduce" strategy for efficient context handling and a "Safe Diff" engine to ensure zero-hallucination patch generation.
 
 ---
 
