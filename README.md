@@ -1,10 +1,5 @@
 # SOTA Code Refinement Agent
 
-[Status: Prototype]
-[Docker: Rootless]
-[AI: Gemini 1.5 Pro]
-[Stack: FastAPI, TypeScript]
-
 A local, Dockerized code refactoring system designed for high-stakes environments. It utilizes a "Map-Reduce" strategy for efficient context handling and a "Safe Diff" engine to ensure zero-hallucination patch generation.
 
 ---
