@@ -1,7 +1,6 @@
-# Local Dockerized AI Code Refinement System (Google ADK)
+# State-of-the-art Coding Agent
 
-A **production-ready, local-first AI code refinement system** built with **Google Agent Development Kit (ADK)**, **FastAPI**, and a **VS Code Extension**.  
-It performs **deterministic, safe, reviewable refactoring** using a multi-agent architecture and a virtual diff-based UX.
+A **production-ready AI code refinement system** built with **Google Agent Development Kit (ADK)** and **FastAPI** as a **VS Code Extension**. It performs **deterministic, safe, reviewable refactoring** using a multi-agent architecture and a virtual diff-based UX.
 
 This system is designed for **professional engineering workflows** where correctness, traceability, and developer control are mandatory.
 
