@@ -1,5 +1,7 @@
 # State-of-the-art Coding Agent
 
+![System Architecture](https://github.com/user-attachments/assets/eb705e04-4374-4301-946d-ed36b05221b4)
+
 A **production-ready AI code refinement system** built with **Google Agent Development Kit (ADK)** and **FastAPI** as a **VS Code Extension**. It performs **deterministic, safe, reviewable refactoring** using a multi-agent architecture and a virtual diff-based UX.
 
 This system is designed for **professional engineering workflows** where correctness, traceability, and developer control are mandatory.
