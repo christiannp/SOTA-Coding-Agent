@@ -1,19 +1,28 @@
 {
-  "name": "sota-coding-agent",
-  "displayName": "SOTA Coding Agent",
-  "version": "0.0.1",
-  "engines": { "vscode": "^1.80.0" },
-  "activationEvents": [],
-  "main": "./out/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "sota-coding-agent.start",
-        "title": "SOTA Coding Agent: Start Refactoring"
-      }
-    ]
+  "name": "code-refine-extension",
+  "displayName": "Code Refinement",
+  "description": "VSCode extension for local AI-driven code refinement",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.70.0"
+  },
+  "activationEvents": [
+    "onCommand:codeRefine.runRefine"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "postinstall": "node ./node_modules/vscode/bin/install"
   },
   "dependencies": {
-    "axios": "^1.6.0"
+    "axios": "^0.21.1"
+  },
+  "devDependencies": {
+    "typescript": "^4.0.0",
+    "vscode": "^1.1.37",
+    "@types/node": "^14.14.0",
+    "@types/vscode": "^1.70.0"
   }
 }

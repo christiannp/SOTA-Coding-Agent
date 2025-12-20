@@ -1,61 +1,59 @@
-import google.generativeai as genai
-import json
+import os
+from google.adk.agents.llm_agent import Agent
+from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPServerParams
+from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset
 
-class AgentBrain:
-    def __init__(self, api_key: str):
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-pro-latest')
+# System prompt for the Coder agent (from spec:contentReference[oaicite:0]{index=0})
+system_prompt = (
+    "You are a Google Senior Engineer. Use ADK with deterministic settings.\n"
+    "For every file you modify:\n"
+    "1. Output ONLY the full new file content.\n"
+    "2. Add a top-of-file changelog comment:\n"
+    "   AI-REF: { timestamp, agent: 'coder', reason_id }\n"
+    "3. Use explicit type hints and document Big-O complexity.\n"
+    "4. Cite sources in docstrings as [Title, Year, URL]. If none, say 'No SOTA found'.\n"
+    "5. Preserve original variable naming unless objectively incorrect.\n"
+    "6. Do not change public APIs unless explicitly instructed.\n"
+    "7. Provide or update unit tests when behavior changes.\n"
+    "8. Use language-appropriate formatting.\n"
+    "9. Do NOT include chain-of-thought or internal reasoning.\n"
+    "If a file cannot be safely refactored, return it unchanged with a short reason."
+)
 
-    def plan_refactoring(self, skeletons, instruction):
-        """
-        Returns a list of file paths that are relevant to the instruction.
-        """
-        # Map inputs to a prompt context
-        context_str = "\n".join([f"--- {s.file_path} ---\n{s.content_head}\n" for s in skeletons])
-        
-        prompt = f"""
-        Analyze the following file skeletons (first 50 lines).
-        User Instruction: "{instruction}"
-        
-        Return a JSON object with a single key 'relevant_files' containing a list of strings 
-        of the file paths that need to be modified or read in depth.
-        """
-        
-        response = self.model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-        return json.loads(response.text)['relevant_files']
+# Use Gemini 1.5 Pro in deterministic mode
+gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-pro-long")
 
-    def generate_code(self, full_content, file_path):
-        """
-        Refactors the specific file.
-        """
-        system_prompt = self._get_system_prompt()
-        prompt = f"""
-        File: {file_path}
-        Content:
-        ```python
-        {full_content}
-        ```
-        
-        Refactor this code completely. Output ONLY the code, no markdown fencing needed if possible, 
-        but if markdown is used, I will strip it.
-        """
-        
-        response = self.model.generate_content([system_prompt, prompt])
-        
-        # Basic cleanup of markdown if Gemini adds it
-        code = response.text.replace("```python", "").replace("```", "").strip()
-        return code
+# Planner Agent (selects files to refactor)
+PlannerAgent = Agent(
+    model=gemini_model,
+    name="PlannerAgent",
+    description="Agent to decide which files need refactoring",
+    instruction="Analyze the file tree and skeleton code to choose files for refactoring. Output JSON list of target files with reasons.",
+    tools=[],
+)
 
-    def _get_system_prompt(self):
-        system_prompt = f"""You are a Google Senior Engineer and a world-class Python expert. Your goal is to refactor code to be State-of-the-Art (SOTA).
+# Research Agent (searches SOTA references via Firecrawl)
+firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+firecrawl_api_url = os.getenv("FIRECRAWL_API_URL")
+tools = []
+if firecrawl_api_key:
+    base_url = firecrawl_api_url.rstrip("/") if firecrawl_api_url else "https://mcp.firecrawl.dev"
+    mcp_url = f"{base_url}/{firecrawl_api_key}/v2/mcp"
+    params = StreamableHTTPServerParams(url=mcp_url)
+    tools = [MCPToolset(connection_params=params)]
+ResearchAgent = Agent(
+    model=gemini_model,
+    name="ResearchAgent",
+    description="Agent to find state-of-the-art coding best practices",
+    instruction="Search for current best practices for the code being refactored. Return citations and summaries.",
+    tools=tools,
+)
 
-        Adhere to the following strict guidelines:
-
-        1.  **Type Safety**: You must prioritize Type Hints (Python 3.11+ syntax) for all function arguments and return types. Use `typing.Optional`, `typing.List`, etc., precisely.
-        2.  **Algorithmic Efficiency**: Analyze the Big-O notation of the existing code. If an O(n^2) operation can be reduced to O(n) or O(n log n), you must perform that optimization.
-        3.  **Documentation & Citations**:
-            * Docstrings must follow Google Style.
-            * You must cite the research paper, algorithm name, or mathematical source in the docstring if you implement a complex optimization (e.g., "Implements Dijkstra's algorithm optimized with a Fibonacci heap").
-        4.  **Preservation**: Retain the original variable naming style (snake_case vs camelCase) unless it is objectively incorrect or violates PEP-8 explicitly. Do not change business logic, only structure and efficiency.
-        5.  **Output**: Return the full, runnable file content. Do not output diffs. Do not output markdown conversational text."""
-        return system_prompt
+# Coder Agent (performs code refactoring)
+CoderAgent = Agent(
+    model=gemini_model,
+    name="CoderAgent",
+    description="Agent to rewrite code files according to plan and research",
+    instruction=system_prompt,
+    tools=[],
+)

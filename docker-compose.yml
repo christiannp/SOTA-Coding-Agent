@@ -1,34 +1,27 @@
+# docker-compose.yml
 version: '3.8'
-
 services:
-  # Python Backend - The Brain
   backend:
-    build:
-      context: ./backend
-      args:
-        # Pass host user ID to prevent permission issues
-        - UID=${UID:-1000}
-        - GID=${GID:-1000}
-    image: code-refiner-backend
+    build: ./backend
+    container_name: code_refine_backend
     ports:
       - "8000:8000"
-    volumes:
-      # Mount the project directory you want to refactor
-      - ./:/workspace
-    env_file:
-      - .env
     environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - FIRECRAWL_API_URL=http://firecrawl:3002
-    depends_on:
-      - firecrawl
+      - GEMINI_MODEL=${GEMINI_MODEL}
+      - FIRECRAWL_API_URL=${FIRECRAWL_API_URL}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+    restart: unless-stopped
 
-  # Self-Hosted Research Agent
   firecrawl:
-    image: firecrawl/firecrawl:latest
-    ports:
-      - "3002:3002"
+    image: node:18
+    container_name: firecrawl_mcp
+    working_dir: /app
+    command: >-
+      /bin/sh -c "npm install -g firecrawl-mcp &&
+                  HTTP_STREAMABLE_SERVER=true firecrawl-mcp"
     environment:
-      - PORT=3002
-    # Note: Firecrawl self-hosting often requires Redis/Playwright
-    # This is the minimal service definition for the architecture.
+      - FIRECRAWL_API_URL=${FIRECRAWL_API_URL}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

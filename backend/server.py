@@ -1,86 +1,240 @@
-import os
-import difflib
-import black
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
-from typing import List, Dict, Optional
-from agent_logic import AgentBrain
+from typing import List, Optional
+import logging, json, os, base64, hashlib, datetime
+from agent_logic import PlannerAgent, ResearchAgent, CoderAgent
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+from fastapi.middleware.cors import CORSMiddleware
+
+# Setup structured JSON logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 app = FastAPI()
-agent = AgentBrain(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# --- Pydantic Models ---
-class FileSkeleton(BaseModel):
-    file_path: str
-    content_head: str  # First 50 lines
+# Metrics counters
+plan_counter = Counter('plan_requests_total', 'Total /plan requests')
+refactor_counter = Counter('refactor_requests_total', 'Total /refactor requests')
+
+# Allow CORS if needed
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Health endpoint
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# Prometheus metrics endpoint
+@app.get("/metrics")
+async def metrics():
+    content = generate_latest()
+    return Response(content=content, media_type=CONTENT_TYPE_LATEST)
+
+# Request/Response models
+class FileTreeItem(BaseModel):
+    path: str
+    type: str
+    size: int
+
+class SkeletonItem(BaseModel):
+    path: str
+    content: str  # base64-encoded skeleton
 
 class PlanRequest(BaseModel):
-    skeletons: List[FileSkeleton]
-    user_instruction: str
+    request_id: str
+    workspace_root: str
+    file_tree: List[FileTreeItem]
+    skeletons: List[SkeletonItem]
+    max_skeleton_bytes: int
+
+class TargetFile(BaseModel):
+    path: str
+    reason: str
+
+class PlanResponse(BaseModel):
+    request_id: str
+    target_files: List[TargetFile]
+    planner_version: str
+    seed: int
+    estimated_token_cost: int
+
+class RefactorFile(BaseModel):
+    path: str
+    content: str  # base64-encoded full file
+
+class ResearchConstraints(BaseModel):
+    max_papers: int
+    allowed_sources: List[str]
 
 class RefactorRequest(BaseModel):
-    file_path: str
-    full_content: str
-    research_context: Optional[str] = ""
+    request_id: str
+    target_files: List[RefactorFile]
+    research_constraints: ResearchConstraints
+    dry_run: bool
+
+class ResultItem(BaseModel):
+    path: str
+    orig_sha: str
+    new_sha: str
+    diff: str
+    new_content: str
+    formatting_ok: bool
+    error: Optional[str] = None
 
 class RefactorResponse(BaseModel):
-    original_file: str
-    refactored_code: str
-    diff: str
+    request_id: str
+    results: List[ResultItem]
+    branch: Optional[str] = None
 
-# --- Endpoints ---
+# Exception handlers
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.error(json.dumps({"error": "validation_error", "message": str(exc)}))
+    return JSONResponse(status_code=422, content={"error": "validation_error", "message": str(exc)})
 
-@app.post("/plan")
-async def create_plan(request: PlanRequest):
-    """
-    Phase 1: Map-Reduce Planning.
-    Analyzes skeletons to decide which files need reading.
-    """
-    try:
-        target_files = agent.plan_refactoring(request.skeletons, request.user_instruction)
-        return {"target_files": target_files}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    logger.error(json.dumps({"error": "internal_error", "message": str(exc)}))
+    return JSONResponse(status_code=500, content={"error": "internal_error", "message": str(exc)})
 
-@app.post("/refactor")
-async def execute_refactor(request: RefactorRequest):
-    """
-    Phase 2 & 3: Execution & Safe Diff.
-    Research -> Generate -> Format -> Diff.
-    """
-    # Step 1: Research (Mocked integration for brevity, usually calls Firecrawl)
-    # research_data = requests.post(FIRECRAWL_URL, ...)
-    
-    # Step 2: Coder Agent Generates Full Code
-    raw_ai_code = agent.generate_code(request.full_content, request.file_path)
+@app.post("/plan", response_model=PlanResponse)
+async def plan(request: PlanRequest):
+    plan_counter.inc()
+    # Basic validations
+    if ".." in request.workspace_root.split(os.sep):
+        raise HTTPException(status_code=400, detail="Invalid workspace_root")
 
-    # Step 3: Sanitization (The Safe Diff Strategy)
-    # We normalize both original and new code using Black to ensure
-    # the diff is purely semantic, not whitespace noise.
-    try:
-        # Format Original (if possible)
-        norm_original = black.format_str(request.full_content, mode=black.Mode())
-    except:
-        norm_original = request.full_content # Fallback if syntax error in original
+    total_bytes = sum(len(item.content) for item in request.skeletons)
+    if total_bytes > request.max_skeleton_bytes:
+        raise HTTPException(status_code=400, detail="max_skeleton_bytes exceeded")
 
-    try:
-        # Format AI Code
-        norm_ai = black.format_str(raw_ai_code, mode=black.Mode())
-    except:
-        # If AI generates invalid syntax, we return raw but flag it implies error
-        norm_ai = raw_ai_code 
+    # Planner logic (stubbed): select all files sorted
+    paths = sorted(item.path for item in request.file_tree)
+    target_files = []
+    for p in paths:
+        target_files.append({"path": p, "reason": f"Refactor recommended for {p}"})
 
-    # Step 4: Mathematical Diff Calculation
-    diff_gen = difflib.unified_diff(
-        norm_original.splitlines(keepends=True),
-        norm_ai.splitlines(keepends=True),
-        fromfile=request.file_path,
-        tofile=f"ai_{request.file_path}",
-    )
-    diff_text = "".join(diff_gen)
+    seed = int(hashlib.sha256(request.request_id.encode()).hexdigest(), 16) % (10**8)
+    estimated_token_cost = total_bytes // 4
 
-    return RefactorResponse(
-        original_file=request.file_path,
-        refactored_code=norm_ai,
-        diff=diff_text
-    )
+    response = {
+        "request_id": request.request_id,
+        "target_files": target_files,
+        "planner_version": "1.0.0",
+        "seed": seed,
+        "estimated_token_cost": estimated_token_cost,
+    }
+    logger.info(json.dumps({"event": "plan_completed", "request_id": request.request_id, "targets": target_files}))
+    return response
+
+@app.post("/refactor", response_model=RefactorResponse)
+async def refactor(request: RefactorRequest):
+    refactor_counter.inc()
+    results = []
+    for item in request.target_files:
+        path = item.path
+        if ".." in path.split(os.sep):
+            results.append({
+                "path": path,
+                "orig_sha": "",
+                "new_sha": "",
+                "diff": "",
+                "new_content": "",
+                "formatting_ok": False,
+                "error": "validation_error: invalid path"
+            })
+            continue
+
+        # Decode original content
+        try:
+            orig_content = base64.b64decode(item.content).decode('utf-8', errors='ignore')
+        except Exception as e:
+            results.append({
+                "path": path,
+                "orig_sha": "",
+                "new_sha": "",
+                "diff": "",
+                "new_content": "",
+                "formatting_ok": False,
+                "error": f"decoding_error: {e}"
+            })
+            continue
+
+        # (Placeholder) Research agent logic could go here
+
+        # Coder agent logic (stubbed): prepend AI-REF comment
+        timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        reason_id = hashlib.sha256((request.request_id + path).encode()).hexdigest()[:8]
+        if path.endswith(".py"):
+            comment = f"# AI-REF: {{timestamp: {timestamp}, agent: 'coder', reason_id: {reason_id}}}\n"
+        else:
+            comment = f"// AI-REF: {{timestamp: {timestamp}, agent: 'coder', reason_id: {reason_id}}}\n"
+        new_content = comment + orig_content
+
+        # Format code with isort+Black
+        formatting_ok = True
+        error_msg = None
+        try:
+            import isort
+            from black import format_str, FileMode
+            formatted_orig = format_str(isort.code(orig_content, profile="black"), mode=FileMode())
+            formatted_new = format_str(isort.code(new_content, profile="black"), mode=FileMode())
+        except Exception as e:
+            formatting_ok = False
+            formatted_orig = orig_content
+            formatted_new = new_content
+            error_msg = str(e)
+
+        # Compute unified diff
+        import difflib
+        orig_lines = formatted_orig.splitlines(keepends=True)
+        new_lines = formatted_new.splitlines(keepends=True)
+        diff = ''.join(difflib.unified_diff(orig_lines, new_lines, fromfile=path, tofile=path, lineterm=''))
+
+        orig_sha = hashlib.sha256(formatted_orig.encode()).hexdigest()
+        new_sha = hashlib.sha256(formatted_new.encode()).hexdigest()
+
+        results.append({
+            "path": path,
+            "orig_sha": orig_sha,
+            "new_sha": new_sha,
+            "diff": diff,
+            "new_content": formatted_new,
+            "formatting_ok": formatting_ok,
+            "error": error_msg
+        })
+
+        # If apply mode, commit changes
+        if not request.dry_run:
+            from git import Repo
+            try:
+                repo = Repo(os.getcwd())
+                branch_name = f"ai-refactor/{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+                repo.git.checkout('-b', branch_name)
+                file_path = os.path.join(request.workspace_root, path)
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(formatted_new)
+                repo.index.add([file_path])
+                repo.index.commit('AI refactor commit')
+            except Exception as e:
+                logger.error(json.dumps({"error": "git_error", "message": str(e)}))
+
+    branch_name = None
+    if not request.dry_run:
+        branch_name = f"ai-refactor/{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    return {
+        "request_id": request.request_id,
+        "results": results,
+        "branch": branch_name
+    }

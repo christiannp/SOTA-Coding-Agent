@@ -1,105 +1,210 @@
-# SOTA Code Refinement Agent
+# Local Dockerized AI Code Refinement System (Google ADK)
 
-[Status: Prototype]
-[Docker: Rootless]
-[AI: Gemini 1.5 Pro]
-[Stack: FastAPI, TypeScript]
+A **production-ready, local-first AI code refinement system** built with **Google Agent Development Kit (ADK)**, **FastAPI**, and a **VS Code Extension**.  
+It performs **deterministic, safe, reviewable refactoring** using a multi-agent architecture and a virtual diff-based UX.
 
-A local, Dockerized code refactoring system designed for high-stakes environments. It utilizes a "Map-Reduce" strategy for efficient context handling and a "Safe Diff" engine to ensure zero-hallucination patch generation.
+This system is designed for **professional engineering workflows** where correctness, traceability, and developer control are mandatory.
 
 ---
 
-## High-Level Architecture
+## Key Features
 
-The system operates via a split architecture: a VS Code Extension (Frontend) and a Dockerized Python Backend (AI Brain).
+- **Google ADK–based multi-agent system**
+  - Planner Agent (structure-only analysis)
+  - Research Agent (SOTA search via Firecrawl MCP)
+  - Coder Agent (deterministic full-file rewriting)
 
-Flow:
-1. VS Code Extension -> Sends File Skeletons -> Backend (/plan)
-2. Backend (Gemini) -> Selects Targets -> Returns Target List
-3. VS Code Extension -> Sends Full Content -> Backend (/refactor)
-4. Backend -> Calls Firecrawl (Research) & Gemini (Generation)
-5. Backend -> Runs Safe Diff Strategy -> Returns Diff Stream
-6. VS Code Extension -> Renders Virtual Side-by-Side Diff
+- **Strict Map–Reduce Context Strategy**
+  - Phase 1: File tree + skeletons only
+  - Phase 2: Full content for selected files only
 
----
+- **Safe Diff Strategy**
+  - AI generates **full file content only**
+  - Both original and new code are formatted
+  - Unified diffs computed server-side
+  - SHA hashes for integrity verification
 
-## Core Features
+- **Virtual Document UX (VS Code)**
+  - No files overwritten by default
+  - Native side-by-side diff (`vscode.diff`)
+  - Changes applied only on explicit user action
 
-### 1. Map-Reduce Token Strategy
-To avoid overflowing the context window, the agent never reads the entire repository at once.
-- Phase 1 (Map): Reads only the file tree + first 50 lines (Skeleton) to plan.
-- Phase 2 (Reduce): Reads full content only for files identified as relevant.
-
-### 2. "Safe Diff" Guarantee
-Unlike standard coding copilots, this agent does not predict patches directly (which often leads to hallucinated line numbers).
-1. The Agent rewrites the *entire* file.
-2. The Backend runs a formatter (Black) on both Original and New code.
-3. Python's `difflib` mathematically computes the patch.
-Result: 100% syntactically valid patches.
-
-### 3. Rootless Docker Infrastructure
-The backend runs in a container but accepts your host UID/GID. Generated files are owned by your user, not root.
-
-### 4. Virtual Document UX
-Changes are not written to disk immediately. The extension creates a 'ai-refactor:/' virtual document scheme, allowing you to review changes in a native VS Code "Compare" window before applying.
+- **Deterministic & Auditable**
+  - Gemini 1.5 Pro via ADK
+  - Temperature = 0
+  - Explicit seeds, hashes, and versions
+  - Structured JSON logging and metrics
 
 ---
 
 ## Tech Stack
 
-- Orchestration: Google Agent Development Kit
-- LLM: Gemini 1.5 Pro (Long Context)
-- Research: Self-hosted Firecrawl (Docker)
-- Backend: FastAPI (Python 3.11)
-- Frontend: VS Code Extension (TypeScript)
+**Backend**
+- Python 3.11
+- FastAPI
+- Google Agent Development Kit (`google-adk`)
+- Gemini 1.5 Pro (via ADK)
+- Firecrawl MCP (self-hosted)
+- GitPython
+- Black, isort, Ruff
+- Prometheus metrics
+
+**Frontend**
+- VS Code Extension
+- TypeScript
+- Native diff rendering
+
+**Infrastructure**
+- Docker Compose
+- Rootless-compatible containers
 
 ---
 
-## Getting Started
+## Supported Languages (Initial Scope)
 
-### Prerequisites
-- Docker & Docker Compose
-- Node.js & npm
-- A Google AI Studio API Key
-
-### Step 1: Environment Setup
-Create a .env file in the root directory:
-GOOGLE_API_KEY=your_gemini_api_key_here
-UID=1000  # Run 'id -u' to find yours
-GID=1000  # Run 'id -g' to find yours
-
-### Step 2: Start the Backend
-Launch the AI Brain and Firecrawl services:
-$ docker-compose up --build
-
-*The API will be available at http://localhost:8000.*
-
-### Step 3: Launch the Extension
-1. Open the /vscode-extension folder in VS Code.
-2. Install dependencies:
-   $ npm install
-3. Press F5 to open the Extension Development Host.
+- Python
+- TypeScript / JavaScript
 
 ---
 
-## Usage Guide
+## Core Design Principles
 
-1. In the Extension Development Host window, open a Python project you wish to refactor.
-2. Open the Command Palette (Ctrl+Shift+P / Cmd+Shift+P).
-3. Run: "AI Refiner: Start Refactoring".
-4. Enter your instruction (e.g., "Refactor the database connector to use a connection pool and add type hints").
-5. Watch the status bar as the Agent plans and executes.
-6. A Diff Window will open automatically showing the SOTA refactor.
+### 1. Map–Reduce Context Strategy
+
+The system **never sends the entire codebase to the LLM at once**.
+
+- **Planning phase**
+  - File tree metadata
+  - First 50 lines of each file
+  - Planner Agent selects target files deterministically
+
+- **Execution phase**
+  - Only selected files are sent
+  - Execution is rejected if planning was skipped
+
+### 2. Safe Diff Strategy
+
+- No patch or diff generation by the LLM
+- AI outputs **full rewritten files only**
+- Backend:
+  1. Formats original and new code
+  2. Computes unified diff
+  3. Calculates SHA-256 hashes
+- Failures are isolated per file
+
+### 3. Virtual Document UX
+
+- Backend does **not** write files by default
+- VS Code renders AI output as virtual documents
+- Developers review changes exactly like a Git diff
+- Optional apply mode:
+  - Creates `ai-refactor/<timestamp>` branch
+  - Commits via GitPython
 
 ---
 
-## System Prompts
+## API Overview
 
-The Agent operates under the following strict system instructions:
-"You are a Google Senior Engineer. You must prioritize Type Hints and Big-O Notation efficiency. You must cite the research paper or algorithm source in the docstring. Retain the original variable naming style unless objectively incorrect."
+### `POST /plan`
+
+Analyzes project structure and selects files for refactoring.
+
+**Input**
+- Workspace root
+- File tree metadata
+- Base64-encoded skeletons
+- Hard limits enforced
+
+**Output**
+- Deterministic list of target files with reasons
+- Planner version and seed
+- Estimated token cost
+
+### `POST /refactor`
+
+Refactors selected files using Research + Coder agents.
+
+**Input**
+- Full content of target files only
+- Research constraints
+- Dry-run or apply mode
+
+**Output**
+- Per-file diffs, hashes, formatting status
+- AI-generated full file content
+- Git branch name if applied
+
+### Other Endpoints
+
+- `GET /health` – Health check
+- `GET /metrics` – Prometheus-compatible metrics
 
 ---
 
-## License
+## VS Code Extension Workflow
 
-Distributed under the MIT License.
+1. Scan workspace for supported files
+2. Send skeletons to `/plan`
+3. Display planned target files and reasons
+4. User chooses:
+   - **Dry Run** (default)
+   - **Apply Changes**
+5. Call `/refactor`
+6. Open native side-by-side diffs
+7. Optionally apply and commit changes
+
+---
+
+## Running Locally
+
+### 1. Environment Setup
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Fill in:
+- GOOGLE_API_KEY
+- GEMINI_MODEL (default: gemini-1.5-pro-long)
+- FIRECRAWL_API_KEY
+
+### 2. Start Services
+```bash
+docker compose up
+```
+
+Backend: http://localhost:8000
+Firecrawl MCP: http://localhost:3000
+
+### 3. Use the VS Code Extension
+
+1. Open the workspace you want to refactor
+2. Run command: “Code Refine: Run Refactor”
+3. Review diffs
+4. Apply only if satisfied
+
+---
+
+## Security & Safety
+
+- Workspace path validation and sandboxing
+- Path traversal prevention
+- Read-only behavior by default
+- Non-root containers
+- Rate-limited research tooling
+- Deterministic LLM execution
+
+---
+
+## Intended Use
+
+This system is designed for:
+- Senior engineers and tech leads
+- Large or sensitive codebases
+- Regulated or high-assurance environments
+- AI-assisted refactoring with human control
+
+It is not intended for:
+- Blind auto-apply refactoring
+- Non-deterministic experimentation
+- Patch-based code mutation
